@@ -1,0 +1,143 @@
+// Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2020-2021 Peng Cheng Laboratory
+//
+// XiangShan is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//          https://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+
+package xiangshan.frontend.ifu
+
+import chisel3._
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import utility.XSError
+
+class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
+  class InstrBoundaryIO(implicit p: Parameters) extends IfuBundle {
+    class Req(implicit p: Parameters) extends IfuBundle {
+      val valid:               Bool            = Bool()
+      val firstInstrIsHalfRvi: Bool            = Bool()
+      val fetchBlock:          Vec[FetchBlock] = Vec(MaxFetchReqNum, new FetchBlock)
+      val ifuData:             IfuData         = new IfuData
+      val totalEndPos:         UInt            = UInt(FetchBlockInstOffsetWidth.W)
+    }
+    class Resp(implicit p: Parameters) extends IfuBundle {
+      val rawInstrVec:       Vec[Instruction] = Vec(FetchBlockInstNum, new Instruction)
+      val instrEndMask:      Vec[Bool]        = Vec(FetchBlockInstNum, Bool())
+      val firstEndIsHalfRvi: Bool             = Bool()
+      val totalEndIsHalfRvi: Bool             = Bool()
+    }
+    val req:  Req  = Flipped(new Req)
+    val resp: Resp = new Resp
+  }
+  val io: InstrBoundaryIO = IO(new InstrBoundaryIO)
+
+  private val index    = io.req.ifuData.index
+  private val maybeRvc = io.req.ifuData.maybeRvcMap
+  private val blockSel = io.req.ifuData.blockSel
+
+  // We compute the boundaries of instructions in the first half of the fetch block directly, and compute the boundaries
+  // of instructions in the latter half in two cases in parallel. Then we can choose the correct case according to
+  // whether the last instruction in the first half is a 16-bit instruction or not.
+  private val boundary            = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
+  private val latterHalfBoundary1 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
+  private val latterHalfBoundary2 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
+
+  private def generateBoundary(
+      boundary:            Vec[Bool],
+      start:               Int,
+      end:                 Int,
+      firstInstrIsHalfRvi: Bool
+  ): Unit = {
+    require(HasCExtension, "C Extension can not be disabled in XiangShan")
+    for (i <- start until end) {
+      boundary(i) := {
+        if (i == start) !firstInstrIsHalfRvi else !boundary(i - 1) || maybeRvc(i - 1)
+      }
+    }
+  }
+
+  generateBoundary(boundary, 0, FetchBlockInstNum / 2, io.req.firstInstrIsHalfRvi)
+  generateBoundary(latterHalfBoundary1, FetchBlockInstNum / 2, FetchBlockInstNum, true.B)
+  generateBoundary(latterHalfBoundary2, FetchBlockInstNum / 2, FetchBlockInstNum, false.B)
+
+  for (i <- FetchBlockInstNum / 2 until FetchBlockInstNum) {
+    boundary(i) := Mux(
+      boundary(FetchBlockInstNum / 2 - 1) && !maybeRvc(FetchBlockInstNum / 2 - 1),
+      latterHalfBoundary1(i),
+      latterHalfBoundary2(i)
+    )
+  }
+
+  io.resp.rawInstrVec := (0 until FetchBlockInstNum).map { i =>
+    val instr   = Wire(new Instruction)
+    val isStart = boundary(i)
+
+    val crossBlockFallThrough =
+      if (i == FetchBlockInstNum - 1) {
+        false.B
+      } else {
+        io.req.fetchBlock(1).valid && !io.req.fetchBlock(0).takenCfiOffset.valid &&
+        (i.U === io.req.fetchBlock(0).takenCfiOffset.bits) &&
+        !blockSel(i) && blockSel(i + 1)
+      }
+    instr.valid := {
+      if (i == 0)
+        io.req.firstInstrIsHalfRvi || isStart
+      else isStart
+    }
+
+    instr.index := index(i)
+    instr.data  := 0.U
+
+    instr.isRvc := isStart && maybeRvc(i)
+    // After repeated and careful trade-offs, we decided to postpone the blockSel judgment for instructions that cross a FetchBlock.
+    // 1: If we set blockSel to 1 for such a crossing instruction here, we would need to adjust startOffset and endOffset accordingly – that is fine.
+    // 2: We need to fetch the corresponding instruction from the FetchBlock by index. The fetch logic reads 4 bytes sequentially.
+    // Even if we change blockSel to 1, no matter how we adjust the index, we would still have to combine isCrossBlockInstr and
+    // take data from FetchBlock0 and FetchBlock1 separately to assemble the instruction that spans two FetchBlocks.
+    // Why not extract the instruction data directly inside InstrBoundary? Logically it is possible, but hard to meet timing constraints.
+    // 3: Since we cannot resolve this cleanly in one place, we might as well compute the final result at the point of use by combining isCrossBlockInstr and blockSel.
+    instr.blockSel := blockSel(i)
+
+    instr.isPredTaken       := false.B
+    instr.invalidTaken      := false.B
+    instr.isPrevEndHalfRvi  := false.B
+    instr.isCrossBlockInstr := crossBlockFallThrough && !maybeRvc(i)
+
+    val startOffset = Mux(
+      blockSel(i),
+      i.U(FetchBlockInstOffsetWidth.W) - io.req.fetchBlock(0).size,
+      i.U(FetchBlockInstOffsetWidth.W)
+    )
+    instr.startOffset := startOffset
+    instr.endOffset   := Mux(maybeRvc(i), startOffset, startOffset + 1.U)
+
+    instr
+  }
+
+  io.resp.instrEndMask := boundary.zip(maybeRvc.asBools).map { case (boundary, isRvc) =>
+    !boundary || (boundary && isRvc)
+  }
+
+  private val firstEndPos = io.req.fetchBlock(0).takenCfiOffset.bits
+  io.resp.firstEndIsHalfRvi := boundary(firstEndPos) && !maybeRvc(firstEndPos)
+
+  private val totalEndPos = io.req.totalEndPos
+  io.resp.totalEndIsHalfRvi := boundary(totalEndPos) && !maybeRvc(totalEndPos)
+
+  // For differential test only. Will be optimized out in release
+  private val boundDiff = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
+  generateBoundary(boundDiff, 0, FetchBlockInstNum, io.req.firstInstrIsHalfRvi)
+  boundary.zip(boundDiff).foreach {
+    case (a, b) => XSError(io.req.valid && (a =/= b), p"boundary different: $a vs $b\n")
+  }
+}

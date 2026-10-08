@@ -1,0 +1,81 @@
+/*
+ * Device Tree Source for the Wattstone SoC
+ * 
+ * Maps hardware to Linux, especially the GPU, TPU, and NPU regions.
+ */
+
+/dts-v1/;
+
+/ {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    compatible = "wattstone,soc";
+    model = "Wattstone SoC System";
+
+    chosen {
+        bootargs = "console=ttyS0,115200 earlycon";
+        stdout-path = "serial0:115200n8";
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <10000000>;
+
+        cpu0: cpu@0 {
+            device_type = "cpu";
+            compatible = "riscv";
+            reg = <0>;
+            status = "okay";
+            mmu-type = "riscv,sv39";
+            
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                compatible = "riscv,cpu-intc";
+                interrupt-controller;
+            };
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        // Default 16GB RAM for simulation/boot
+        reg = <0x0 0x80000000 0x4 0x00000000>;
+    };
+
+    soc {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        compatible = "simple-bus";
+        ranges;
+
+        uart0: serial@10000000 {
+            compatible = "ns16550a";
+            reg = <0x0 0x10000000 0x0 0x1000>;
+            interrupts = <10>;
+            clock-frequency = <50000000>;
+            status = "okay";
+        };
+
+        gpu: gpu@30000000 {
+            compatible = "wattstone,opengpu";
+            reg = <0x0 0x30000000 0x0 0x1000000>;
+            interrupts = <11>;
+            status = "okay";
+        };
+
+        tpu: tpu@40000000 {
+            compatible = "wattstone,opentpu";
+            reg = <0x0 0x40000000 0x0 0x1000000>;
+            interrupts = <12>;
+            status = "okay";
+        };
+
+        npu: npu@50000000 {
+            compatible = "wattstone,coralnpu";
+            reg = <0x0 0x50000000 0x0 0x1000000>;
+            interrupts = <13>;
+            status = "okay";
+        };
+    };
+};

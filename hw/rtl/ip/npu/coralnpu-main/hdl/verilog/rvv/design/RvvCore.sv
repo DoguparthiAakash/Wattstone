@@ -1,0 +1,372 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+module RvvCore #(parameter N = 4,
+                 parameter CMD_BUFFER_MAX_CAPACITY = 16,
+                 type RegDataT=logic [31:0],
+                 type VRegDataT=logic [127:0],
+                 type RegAddrT=logic [4:0],
+                 type MaskT=logic [15:0]
+                 )
+(
+  input clk,
+  input rstn,
+
+  input logic [`VSTART_WIDTH-1:0] vstart,
+  input logic vstart_valid,
+  input logic [1:0] vxrm,
+  input logic vxsat,
+  input logic [2:0] frm,
+  input logic flush,
+
+  // Instruction input.
+  input logic [N-1:0] inst_valid,
+  input RVVInstruction [N-1:0] inst_data,
+  output logic [N-1:0] inst_ready,
+
+  // Register file input
+  input logic [(2*N)-1:0] reg_read_valid,
+  input RegDataT [(2*N)-1:0] reg_read_data,
+
+  // Floating point register file input
+  input RegDataT [N-1:0] freg_read_data,
+
+  // Scalar Regfile writeback for configuration functions.
+  output logic [N-1:0] reg_write_valid,
+  output RegAddrT [N-1:0] reg_write_addr,
+  output RegDataT [N-1:0] reg_write_data,
+
+  // Scalar Regfile writeback for non-configuration functions.
+  output logic async_rd_valid,
+  output RegAddrT async_rd_addr,
+  output RegDataT async_rd_data,
+  input logic async_rd_ready,
+
+  // Floating Point Regfile writeback.
+  output logic async_frd_valid,
+  output RegAddrT async_frd_addr,
+  output RegDataT async_frd_data,
+  input logic async_frd_ready,
+
+  // RVV to LSU
+  output  logic     [`NUM_LSU-1:0] uop_lsu_valid_rvv2lsu,
+  output  logic     [`NUM_LSU-1:0] uop_lsu_idx_valid_rvv2lsu,
+  output  RegAddrT  [`NUM_LSU-1:0] uop_lsu_idx_addr_rvv2lsu,
+  output  VRegDataT [`NUM_LSU-1:0] uop_lsu_idx_data_rvv2lsu,
+  output  logic     [`NUM_LSU-1:0] uop_lsu_vregfile_valid_rvv2lsu,
+  output  RegAddrT  [`NUM_LSU-1:0] uop_lsu_vregfile_addr_rvv2lsu,
+  output  VRegDataT [`NUM_LSU-1:0] uop_lsu_vregfile_data_rvv2lsu,
+  output  logic     [`NUM_LSU-1:0] uop_lsu_v0_valid_rvv2lsu,
+  output  MaskT     [`NUM_LSU-1:0] uop_lsu_v0_data_rvv2lsu,
+  input   logic     [`NUM_LSU-1:0] uop_lsu_ready_lsu2rvv,
+
+  // LSU to RVV
+  input  logic     [`NUM_LSU-1:0] uop_lsu_valid_lsu2rvv,
+  input  RegAddrT  [`NUM_LSU-1:0] uop_lsu_addr_lsu2rvv,
+  input  VRegDataT [`NUM_LSU-1:0] uop_lsu_wdata_lsu2rvv,
+  input  logic     [`NUM_LSU-1:0] uop_lsu_last_lsu2rvv,
+  input  logic     [`NUM_LSU-1:0][$clog2(`VLENB):0] uop_lsu_ff_tail_index_lsu2rvv,
+  output logic     [`NUM_LSU-1:0] uop_lsu_ready_rvv2lsu,
+
+  // Vector CSR writeback
+  output vcsr_valid,
+  output RVVConfigState vector_csr,
+  input vcsr_ready,
+
+  // Config state
+  output config_state_valid,
+  output RVVConfigState config_state,
+  output logic [31:0] next_config_mtype_o,
+
+  // Idle
+  output logic rvv_idle,
+  output logic [$clog2(2*N + 1)-1:0] queue_capacity,
+
+  // Writeback from reorder buffer and decode stage
+  output ROB2RT_t [`NUM_RT_UOP+`NUM_DE_INST-1:0] rd_rob2rt_o,
+  output logic    [`NUM_RT_UOP+`NUM_DE_INST-1:0] rd_valid_rob2rt_o,
+
+  // Trap output
+  output logic trap_valid_o,
+  output RVVInstruction trap_data_o,
+
+  // VXSAT update from backend (fixes C3 bug: previously dead-end wires)
+  output logic                            wr_vxsat_valid_o,
+  output logic    [`VCSR_VXSAT_WIDTH-1:0] wr_vxsat_o,
+
+  // Floating point fflags update from backend
+  output logic                            wr_fflags_valid_o,
+  output logic    [4:0]                   wr_fflags_o
+`ifdef ZVT_ON
+  ,
+  // VME to LSU (store data)
+  output logic uop_vme2lsu_valid,
+  output VRegDataT uop_vme2lsu_data,
+  input logic uop_vme2lsu_ready,
+
+  // LSU to VME (load data)
+  input logic uop_lsu2vme_valid,
+  input VRegDataT uop_lsu2vme_data,
+  output logic uop_lsu2vme_ready,
+
+  // VME retirement
+  output logic vmeRtVld_o,
+  output VMERT_t vmeRt_o,
+  input  logic vmeRtRdy_i
+`endif
+);
+  logic [N-1:0] frontend_cmd_valid;
+  RVVCmd [N-1:0] frontend_cmd_data;
+  logic [$clog2(2*N + 1)-1:0] queue_capacity_internal;
+  RvvFrontEnd#(.N(N), .RegDataT(RegDataT), .RegAddrT(RegAddrT)) frontend(
+      .clk(clk),
+      .rstn(rstn),
+      .vstart_i(vstart),
+      .vstart_valid_i(vstart_valid),
+      .vxrm_i(vxrm),
+      .vxsat_i(vxsat),
+      .frm_i(frm),
+      .flush_i(flush),
+      .inst_valid_i(inst_valid),
+      .inst_data_i(inst_data),
+      .inst_ready_o(inst_ready),
+      .reg_read_valid_i(reg_read_valid),
+      .reg_read_data_i(reg_read_data),
+      .freg_read_data_i(freg_read_data),
+      .reg_write_valid_o(reg_write_valid),
+      .reg_write_addr_o(reg_write_addr),
+      .reg_write_data_o(reg_write_data),
+      .cmd_valid_o(frontend_cmd_valid),
+      .cmd_data_o(frontend_cmd_data),
+      .queue_capacity_i(queue_capacity_internal),
+      .queue_capacity_o(queue_capacity),
+      .trap_valid_o(trap_valid_o),
+      .trap_data_o(trap_data_o),
+      .config_state_valid(config_state_valid),
+      .config_state(config_state),
+      .next_config_mtype_o(next_config_mtype_o)
+  );
+
+  // Backpressure from backend fifo
+  logic   [$clog2(`CQ_DEPTH):0] remaining_count_cq2rvs;
+  // Back-pressure frontend
+  always_comb begin
+    if (remaining_count_cq2rvs > 2*N) begin
+      queue_capacity_internal = 2*N;
+    end else begin
+      queue_capacity_internal = remaining_count_cq2rvs;
+    end
+  end
+
+  // Back-end ============================================================
+
+  // LSU Tie-offs
+  // RVV send LSU uop to RVS
+    UOP_RVV2LSU_t     [`NUM_LSU-1:0]          uop_lsu_rvv2lsu;
+    always_comb begin
+      for (int i = 0; i < `NUM_LSU; i++) begin
+        uop_lsu_idx_valid_rvv2lsu[i] = uop_lsu_rvv2lsu[i].vidx_valid;
+        uop_lsu_idx_addr_rvv2lsu[i] = uop_lsu_rvv2lsu[i].vidx_addr;
+        uop_lsu_idx_data_rvv2lsu[i] = uop_lsu_rvv2lsu[i].vidx_data;
+        uop_lsu_vregfile_valid_rvv2lsu[i] = uop_lsu_rvv2lsu[i].vregfile_read_valid;
+        uop_lsu_vregfile_addr_rvv2lsu[i] = uop_lsu_rvv2lsu[i].vregfile_read_addr;
+        uop_lsu_vregfile_data_rvv2lsu[i] = uop_lsu_rvv2lsu[i].vregfile_read_data;
+        uop_lsu_v0_valid_rvv2lsu[i] = uop_lsu_rvv2lsu[i].v0_valid;
+        uop_lsu_v0_data_rvv2lsu[i] = uop_lsu_rvv2lsu[i].v0_data;
+      end
+    end
+
+  // LSU feedback to RVV
+    UOP_LSU2RVV_t     [`NUM_LSU-1:0]          uop_lsu_lsu2rvv;
+    always_comb begin
+      for (int i = 0; i < `NUM_LSU; i++) begin
+        uop_lsu_lsu2rvv[i].vregfile_write_valid = (
+            uop_lsu_valid_lsu2rvv[i] && !uop_lsu_last_lsu2rvv[i]);
+        uop_lsu_lsu2rvv[i].vregfile_write_addr = uop_lsu_addr_lsu2rvv[i];
+        uop_lsu_lsu2rvv[i].vregfile_write_data = uop_lsu_wdata_lsu2rvv[i];
+        uop_lsu_lsu2rvv[i].ff_tail_index = uop_lsu_ff_tail_index_lsu2rvv[i];
+        uop_lsu_lsu2rvv[i].lsu_vstore_last = (
+            uop_lsu_valid_lsu2rvv[i] && uop_lsu_last_lsu2rvv[i]);
+        `ifdef TB_SUPPORT
+              uop_lsu_lsu2rvv[i].uop_pc = 0;
+              uop_lsu_lsu2rvv[i].uop_index = 0;
+        `endif
+      end
+    end
+
+  // Scalar regfile write-back tie-offs
+  // TODO(derekjchow): Properly arbitrate write-back tie-offs by extending
+  // interface. For time being, only accept from slot 0.
+  logic    [`NUM_RT_UOP-1:0] rt_xrf_valid_rvv2rvs;
+  RT2RVS_t [`NUM_RT_UOP-1:0] rt_rvs_rvv2rvs;
+  logic    [`NUM_RT_UOP-1:0] rt_rvs_ready_rvs2rvv;
+
+  always_comb begin
+    rt_rvs_ready_rvs2rvv[0] = async_rd_ready;
+    async_rd_valid = rt_xrf_valid_rvv2rvs[0];
+    async_rd_addr = rt_rvs_rvv2rvs[0].rt_index;
+    async_rd_data = rt_rvs_rvv2rvs[0].rt_data;
+    for (int i = 1; i < `NUM_RT_UOP; i++) begin
+      rt_rvs_ready_rvs2rvv[i] = 0;
+    end
+  end
+
+  // Floating point regfile write-back
+  // TODO(derekjchow): Properly arbitrate write-back tie-offs by extending
+  // interface. For time being, only accept from slot 0.
+  logic [`NUM_RT_UOP-1:0]                           rvv2rvs_frd_valid;
+`ifdef TB_SUPPORT
+  logic [`NUM_RT_UOP-1:0][`PC_WIDTH-1:0]            rvv2rvs_frd_pc;
+`endif
+  logic [`NUM_RT_UOP-1:0][`ROB_TAG_WIDTH-1:0]       rvv2rvs_frd_rob_tag;
+  logic [`NUM_RT_UOP-1:0][`REGFILE_INDEX_WIDTH-1:0] rvv2rvs_frd_addr;
+  logic [`NUM_RT_UOP-1:0][`XLEN-1:0]                rvv2rvs_frd_data;
+  logic [`NUM_RT_UOP-1:0]                           rvv2rvs_frd_ready;
+  always_comb begin
+    rvv2rvs_frd_ready[0] = async_frd_ready;
+    for (int i = 1; i < `NUM_RT_UOP; i++) begin
+      rvv2rvs_frd_ready[i] = 0;
+    end
+  end
+  assign async_frd_valid = rvv2rvs_frd_valid[0];
+  assign async_frd_addr = rvv2rvs_frd_addr[0];
+  assign async_frd_data = rvv2rvs_frd_data[0];
+
+  // Backpressure
+  logic wr_vxsat_ready;
+  always_comb begin
+    // TODO(derekjchow): Actually accept
+    wr_vxsat_ready = 1;
+  end
+
+  // CSR Update, unused for now
+  logic                            wr_vxsat_valid;
+  logic    [`VCSR_VXSAT_WIDTH-1:0] wr_vxsat;
+
+  // Floating point CSR Update, unused for now
+  logic    rt2fcsr_write_valid;
+  RVFEXP_t rt2fcsr_write_data;
+  logic    fcsr2rt_write_ready;
+  always_comb begin
+    // TODO(derekjchow): Actually accept and use
+    fcsr2rt_write_ready = 1;
+  end
+
+  // Trap handling
+  logic  trap_valid_rvs2rvv;
+  logic  trap_ready_rvv2rvs;
+  assign trap_valid_rvs2rvv = flush;
+
+  // Tie-off unused VME interfaces
+`ifdef ZVT_ON
+  logic                 uop_vme2lsu_vld;
+  UOP_VME2LSU_t         uop_vme2lsu;
+  logic                 uop_vme2lsu_rdy;
+  logic                 uop_lsu2vme_vld;
+  UOP_LSU2VME_t         uop_lsu2vme;
+  logic                 uop_lsu2vme_rdy;
+
+  assign uop_vme2lsu_valid = uop_vme2lsu_vld;
+  assign uop_vme2lsu_data  = uop_vme2lsu.r_data;
+  assign uop_vme2lsu_rdy   = uop_vme2lsu_ready;
+
+  assign uop_lsu2vme_vld    = uop_lsu2vme_valid;
+  assign uop_lsu2vme.w_data = uop_lsu2vme_data;
+`ifdef TB_SUPPORT
+  assign uop_lsu2vme.uop_pc    = 0;
+  assign uop_lsu2vme.uop_index = 0;
+`endif
+  assign uop_lsu2vme_ready = uop_lsu2vme_rdy;
+`endif
+
+  logic   [`ISSUE_LANE-1:0] insts_ready_cq2rvs;
+  logic rvv_backend_idle;
+  assign rvv_idle = rvv_backend_idle && (frontend_cmd_valid == 0);
+  rvv_backend backend(
+      .clk(clk),
+      .rst_n(rstn),
+      .insts_valid_rvs2cq(frontend_cmd_valid),
+      .insts_rvs2cq(frontend_cmd_data),
+      .insts_ready_cq2rvs(insts_ready_cq2rvs),
+      .remaining_count_cq2rvs(remaining_count_cq2rvs),
+
+      .uop_lsu_valid_rvv2lsu(uop_lsu_valid_rvv2lsu),
+      .uop_lsu_rvv2lsu(uop_lsu_rvv2lsu),
+      .uop_lsu_ready_lsu2rvv(uop_lsu_ready_lsu2rvv),
+
+      .uop_lsu_valid_lsu2rvv(uop_lsu_valid_lsu2rvv),
+      .uop_lsu_lsu2rvv(uop_lsu_lsu2rvv),
+      .uop_lsu_ready_rvv2lsu(uop_lsu_ready_rvv2lsu),
+
+      .rt_rvs_rvv2rvs(rt_rvs_rvv2rvs),
+      .rt_xrf_valid_rvv2rvs(rt_xrf_valid_rvv2rvs),
+      .rt_rvs_ready_rvs2rvv(rt_rvs_ready_rvs2rvv),
+
+`ifdef ZVE32F_ON
+      .async_frd_valid(rvv2rvs_frd_valid),
+`ifdef TB_SUPPORT
+      .async_frd_pc(rvv2rvs_frd_pc),
+`endif
+      .async_frd_rob_tag(rvv2rvs_frd_rob_tag),
+      .async_frd_addr(rvv2rvs_frd_addr),
+      .async_frd_data(rvv2rvs_frd_data),
+      .async_frd_ready(rvv2rvs_frd_ready),
+`endif
+
+      .wr_vxsat_valid(wr_vxsat_valid),
+      .wr_vxsat(wr_vxsat),
+      .wr_vxsat_ready(wr_vxsat_ready),
+
+`ifdef ZVE32F_ON
+      .rt2fcsr_write_valid(rt2fcsr_write_valid),
+      .rt2fcsr_write_data(rt2fcsr_write_data),
+      .fcsr2rt_write_ready(fcsr2rt_write_ready),
+`endif
+      .trap_valid_rvs2rvv(trap_valid_rvs2rvv),
+      .trap_ready_rvv2rvs(trap_ready_rvv2rvs),
+      .vcsr_valid(vcsr_valid),
+      .vector_csr(vector_csr),
+      .vcsr_ready(vcsr_ready),
+      .rd_valid_rob2rt_o(rd_valid_rob2rt_o),
+      .rvv_idle(rvv_backend_idle),
+      .rd_rob2rt_o(rd_rob2rt_o)
+`ifdef ZVT_ON
+      ,.uop_vme2lsu_vld(uop_vme2lsu_vld),
+      .uop_vme2lsu(uop_vme2lsu),
+      .uop_vme2lsu_rdy(uop_vme2lsu_rdy),
+      .uop_lsu2vme_vld(uop_lsu2vme_vld),
+      .uop_lsu2vme(uop_lsu2vme),
+      .uop_lsu2vme_rdy(uop_lsu2vme_rdy),
+      .vme_lsuflush_vld(1'b0),
+      .vme_lsuflush_rdy(),
+      .vmeRtVld(vmeRtVld_o),
+      .vmeRt(vmeRt_o),
+      .vmeRtRdy(vmeRtRdy_i)
+`endif
+  );
+
+  // Connect vxsat signals to outputs (fixes C3 bug)
+  assign wr_vxsat_valid_o = wr_vxsat_valid;
+  assign wr_vxsat_o = wr_vxsat;
+
+  // Connect fflags signals to outputs
+`ifdef ZVE32F_ON
+  assign wr_fflags_valid_o = rt2fcsr_write_valid;
+  assign wr_fflags_o = rt2fcsr_write_data;
+`else
+  assign wr_fflags_valid_o = 1'b0;
+  assign wr_fflags_o = 5'b0;
+`endif
+
+endmodule

@@ -1,0 +1,18 @@
+{
+  "_comment": "Energy-of-operation parameters in picojoules. Anchored on Horowitz, ISSCC 2014 (int add 0.1 pJ, fp32 mul 3.7 pJ, DRAM ~640 pJ / 32 bits @45nm) and scaled to a modern node; SRAM/HBM values per published on-chip/off-chip figures. mac_pj: one BF16 multiply + f32 accumulate in the ME array (Horowitz 45nm FP16 mul 1.1 + add 0.4 ~ 1.5 pJ, scaled ~1/3; +/-70% PPA band, see sim/me_model.py). EVERY VALUE IS AN ESTIMATE until hardware correlation (validation ladder: docs/architecture/power-thermal.md).",
+  "int_op_pj": 0.35,
+  "float_op_pj": 2.0,
+  "mac_pj": 0.5,
+  "branch_pj": 0.2,
+  "issue_pj_per_cycle": 5.0,
+  "global_read_pj_per_byte": 25.0,
+  "global_write_pj_per_byte": 30.0,
+  "shared_read_pj_per_byte": 0.6,
+  "shared_write_pj_per_byte": 0.6,
+  "local_read_pj_per_byte": 1.2,
+  "local_write_pj_per_byte": 1.2,
+  "constant_read_pj_per_byte": 0.6,
+  "static_power_w": 55.0,
+  "default_freq_ghz": 1.5,
+  "uncertainty_pct": 20
+}

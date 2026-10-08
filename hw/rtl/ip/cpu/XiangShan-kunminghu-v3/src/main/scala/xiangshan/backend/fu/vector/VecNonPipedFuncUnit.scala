@@ -1,0 +1,45 @@
+package xiangshan.backend.fu.vector
+
+import chisel3._
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import utility.DataHoldBypass
+import xiangshan.ExceptionNO
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
+import xiangshan.backend.fu.{FuConfig, FuncUnit}
+
+class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
+  with VecFuncUnitAlias
+{
+  private val src0 = inData.src(0)
+  private val src1 = WireInit(inData.src(1)) // vs2 only
+
+  protected val vs2 = src1
+  protected val vs1 = src0
+  protected val oldVd = inData.src(2)
+
+  protected val outCtrl     = DataHoldBypass(io.in.bits.ctrl, io.in.fire)
+  protected val outData     = DataHoldBypass(io.in.bits.data, io.in.fire)
+
+  protected val outVType    = outCtrl.vtype.get
+  protected val outVm       = outCtrl.vm.get
+  protected val outUopIdx   = outCtrl.uopIdx.get
+
+  // vadc.vv, vsbc.vv need this
+  protected val outNeedClearMask: Bool = VIAluOpcodes.isPredicateAlwaysTrue(outCtrl.fuOpType)
+
+  protected val outVl       = outData.vl.get
+  protected val outOldVd    = outData.src(2)
+  // There is no difference between control-dependency or data-dependency for function unit,
+  // but spliting these in ctrl or data bundles is easy to coding.
+  protected val outSrcMask: UInt = {
+    MuxCase(
+      outData.v0.get, Seq(
+        outNeedClearMask -> allMaskFalse,
+        outVm -> allMaskTrue
+      )
+    )
+  }
+
+  connectNonPipedCtrlSingal
+}
