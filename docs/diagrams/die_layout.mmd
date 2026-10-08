@@ -1,36 +1,36 @@
-graph TD
-    classDef cpu fill:#ffcccc,stroke:#cc9999,color:#000
-    classDef gpu fill:#ccddff,stroke:#99aacc,color:#000
-    classDef tpu fill:#eebbff,stroke:#bb99cc,color:#000
-    classDef npu fill:#ccffcc,stroke:#99cc99,color:#000
-    classDef uncore fill:#ffeeaa,stroke:#ddbb99,color:#000
-    classDef mem fill:#ddeecc,stroke:#99bb99,color:#000
+block-beta
+  columns 8
+  
+  %% Row 1: High Speed Interfaces
+  PCIe["PCIe / Peripheral I/O"]:2 DISP["Display Engine"]:2 DDR1["LPDDR5 Ctrl 0"]:2 DDR2["LPDDR5 Ctrl 1"]:2
+  
+  %% Row 2: CPU and GPU
+  CPU0["CPU 0 (XiangShan)"] CPU1["CPU 1 (XiangShan)"] CPU2["CPU 2 (XiangShan)"] CPU3["CPU 3 (XiangShan)"] GPU1["GPU Cluster 0"]:2 GPU2["GPU Cluster 1"]:2
+  
+  %% Row 3: Caches and GPU
+  L2_0["L2 Cache"] L2_1["L2 Cache"] L2_2["L2 Cache"] L2_3["L2 Cache"] GPU3["GPU Cluster 2"]:2 GPU4["GPU Cluster 3"]:2
+  
+  %% Row 4: SLC and Crossbar
+  SLC["8MB System Level Cache (SLC)"]:4 AXI["High-Speed AXI Interconnect Crossbar"]:4
+  
+  %% Row 5: AI Accelerators
+  TPU_SA["TPU Systolic Array"]:2 TPU_Mem["TPU Memory"]:2 NPU_MAC["NPU MAC Engine"]:2 NPU_SRAM["NPU SRAM"]:2
+  
+  %% Style definitions
+  classDef cpu fill:#ffb3ba,stroke:#ff6b6b,stroke-width:2px,color:#000
+  classDef gpu fill:#bae1ff,stroke:#4dabf7,stroke-width:2px,color:#000
+  classDef tpu fill:#e2cbff,stroke:#b197fc,stroke-width:2px,color:#000
+  classDef npu fill:#baffc9,stroke:#69db7c,stroke-width:2px,color:#000
+  classDef mem fill:#ffffba,stroke:#ffd43b,stroke-width:2px,color:#000
+  classDef io fill:#e9ecef,stroke:#ced4da,stroke-width:2px,color:#000
+  classDef uncore fill:#ffd8b1,stroke:#ffa94d,stroke-width:2px,color:#000
 
-    subgraph Wattstone [Wattstone Unified SoC]
-        direction TB
-        
-        CPU[Compute Core]:::cpu
-        GPU[Graphics Engine]:::gpu
-        TPU[Tensor Core]:::tpu
-        NPU[Neural Core]:::npu
-        DISP[Display Engine]:::gpu
-        
-        AXI{High-Speed AXI Interconnect Crossbar}:::uncore
-        
-        CPU <--> AXI
-        GPU <--> AXI
-        TPU <--> AXI
-        NPU <--> AXI
-        DISP <--> AXI
-        
-        SLC[System Level Cache - SLC]:::mem
-        
-        AXI <--> SLC
-        
-        UMC[Unified Memory Controller]:::mem
-        
-        SLC <--> UMC
-    end
-    
-    DDR[(External LPDDR5 Memory)]:::mem
-    UMC <--> DDR
+  class CPU0,CPU1,CPU2,CPU3 cpu
+  class L2_0,L2_1,L2_2,L2_3 cpu
+  class GPU1,GPU2,GPU3,GPU4 gpu
+  class DISP gpu
+  class TPU_SA,TPU_Mem tpu
+  class NPU_MAC,NPU_SRAM npu
+  class SLC,DDR1,DDR2 mem
+  class PCIe io
+  class AXI uncore
