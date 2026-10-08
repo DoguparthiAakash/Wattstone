@@ -33,6 +33,131 @@ To maintain a cohesive design language and simplify development, all architectur
 *   **System Level Cache (SLC)**: A massive, unified L3/SLC cache bank that all engines read from and write to simultaneously.
 *   **Unified Memory Controller**: Manages the wide, high-speed connection to off-chip LPDDR memory, ensuring the shared memory pool is fed with maximum bandwidth.
 
+### Detailed Component Architectures
+
+Below are detailed block diagrams of the individual logic cores, structurally mirroring the clean architecture style of the Wattstone display pipeline. These diagrams render natively in Markdown viewers (like GitHub).
+
+<details>
+<summary><b>Wattstone Compute Core (CPU)</b></summary>
+
+```mermaid
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph CPU [Compute Core]
+        direction TB
+        IFU[Instruction Fetch Unit]:::control
+        BPU[Branch Prediction Unit]:::control
+        IDU[Instruction Decode Unit]:::control
+        IQ[Instruction Queue]:::control
+        ROB[Reorder Buffer]:::control
+        
+        IFU <--> BPU
+        IFU --> IDU
+        IDU --> IQ
+        IQ --> ROB
+        
+        subgraph Exec [Execution Engines]
+            ALU[ALU Cluster]:::compute
+            FPU[FPU / Vector Unit]:::compute
+            LSU[Load/Store Unit]:::globalmem
+        end
+        
+        ROB --> ALU
+        ROB --> FPU
+        ROB --> LSU
+        
+        Reg[Physical Register File]:::localmem
+        ALU --> Reg
+        FPU --> Reg
+        LSU --> Reg
+        
+        L1I[L1 Instruction Cache]:::localmem
+        L1D[L1 Data Cache]:::localmem
+        
+        L1I --> IFU
+        LSU <--> L1D
+    end
+```
+</details>
+
+<details>
+<summary><b>Wattstone Tensor Core (TPU)</b></summary>
+
+```mermaid
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph TPU [Tensor Core]
+        direction TB
+        Dispatch[Instruction Dispatcher]:::control
+        DMA[DMA Controller]:::globalmem
+        
+        subgraph Memory [Local Memory]
+            WM[Weight Memory]:::localmem
+            AM[Activation Memory]:::localmem
+            ACC[Accumulator Memory]:::localmem
+        end
+        
+        DMA --> WM
+        DMA --> AM
+        
+        subgraph MMU [Matrix Multiply Unit]
+            SA[Systolic Array 128x128]:::compute
+        end
+        
+        WM --> SA
+        AM --> SA
+        SA --> ACC
+        ACC --> VPU[Vector Processing Unit]:::compute
+        VPU --> AM
+    end
+```
+</details>
+
+<details>
+<summary><b>Wattstone Neural Core (NPU)</b></summary>
+
+```mermaid
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph NPU [Neural Core]
+        direction TB
+        Seq[Sequencer / Controller]:::control
+        AXI[AXI Interface]:::globalmem
+        
+        SRAM[On-Chip SRAM Buffer]:::localmem
+        
+        AXI <--> SRAM
+        
+        subgraph Engines [Compute Engines]
+            MAC[MAC Array]:::compute
+            Act[Activation Engine]:::compute
+            Pool[Pooling Engine]:::compute
+        end
+        
+        Seq --> MAC
+        Seq --> Act
+        Seq --> Pool
+        
+        SRAM --> MAC
+        MAC --> Act
+        Act --> Pool
+        Pool --> SRAM
+    end
+```
+</details>
+
 ---
 
 ## 📂 Repository Structure
