@@ -31,14 +31,17 @@ jobs:
         run: |
           mkdir -p docs/images
           
+          # Create puppeteer config to fix sandbox issue in GitHub Actions runner
+          echo '{"args": ["--no-sandbox", "--disable-setuid-sandbox"]}' > puppeteer-config.json
+          
           # Loop through all .mmd files and generate corresponding .svg files
           for file in docs/diagrams/*.mmd; do
             if [ -f "$file" ]; then
               filename=$(basename -- "$file")
               name="${filename%.*}"
               echo "Generating SVG for $name..."
-              # Generate SVG with transparent background
-              mmdc -i "$file" -o "docs/images/${name}.svg" -b transparent
+              # Generate SVG with transparent background and no-sandbox
+              mmdc -i "$file" -o "docs/images/${name}.svg" -b transparent -p puppeteer-config.json
             fi
           done
 
