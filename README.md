@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>⚡ Wattstone SoC</h1>
+  <img src="assets/wattstone-logo.svg" width="1000" alt="Wattstone CPU" />
   <p><strong>A Next-Generation Open-Source Unified Architecture</strong></p>
 </div>
 
