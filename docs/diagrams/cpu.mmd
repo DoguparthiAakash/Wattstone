@@ -1,0 +1,40 @@
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph CPU [Wattstone Compute Core]
+        direction TB
+        IFU[Instruction Fetch Unit]:::control
+        BPU[Branch Prediction Unit]:::control
+        IDU[Instruction Decode Unit]:::control
+        IQ[Instruction Queue]:::control
+        ROB[Reorder Buffer]:::control
+        
+        IFU <--> BPU
+        IFU --> IDU
+        IDU --> IQ
+        IQ --> ROB
+        
+        subgraph Exec [Execution Engines]
+            ALU[ALU Cluster]:::compute
+            FPU[FPU / Vector Unit]:::compute
+            LSU[Load/Store Unit]:::globalmem
+        end
+        
+        ROB --> ALU
+        ROB --> FPU
+        ROB --> LSU
+        
+        Reg[Physical Register File]:::localmem
+        ALU --> Reg
+        FPU --> Reg
+        LSU --> Reg
+        
+        L1I[L1 Instruction Cache]:::localmem
+        L1D[L1 Data Cache]:::localmem
+        
+        L1I --> IFU
+        LSU <--> L1D
+    end

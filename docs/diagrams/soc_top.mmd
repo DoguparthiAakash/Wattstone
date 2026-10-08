@@ -1,0 +1,36 @@
+graph TD
+    classDef cpu fill:#ffcccc,stroke:#cc9999,color:#000
+    classDef gpu fill:#ccddff,stroke:#99aacc,color:#000
+    classDef tpu fill:#eebbff,stroke:#bb99cc,color:#000
+    classDef npu fill:#ccffcc,stroke:#99cc99,color:#000
+    classDef uncore fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef mem fill:#ddeecc,stroke:#99bb99,color:#000
+
+    subgraph Wattstone [Wattstone Unified SoC]
+        direction TB
+        
+        CPU[Compute Core]:::cpu
+        GPU[Graphics Engine]:::gpu
+        TPU[Tensor Core]:::tpu
+        NPU[Neural Core]:::npu
+        DISP[Display Engine]:::gpu
+        
+        AXI{High-Speed AXI Interconnect Crossbar}:::uncore
+        
+        CPU <--> AXI
+        GPU <--> AXI
+        TPU <--> AXI
+        NPU <--> AXI
+        DISP <--> AXI
+        
+        SLC[System Level Cache - SLC]:::mem
+        
+        AXI <--> SLC
+        
+        UMC[Unified Memory Controller]:::mem
+        
+        SLC <--> UMC
+    end
+    
+    DDR[(External LPDDR5 Memory)]:::mem
+    UMC <--> DDR

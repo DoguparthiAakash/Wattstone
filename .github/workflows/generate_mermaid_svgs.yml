@@ -1,0 +1,49 @@
+name: Generate Mermaid SVGs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/diagrams/*.mmd'
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  generate-diagrams:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to push the generated SVGs back to the repo
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Mermaid CLI
+        # Installs the official Mermaid command-line interface
+        run: npm install -g @mermaid-js/mermaid-cli
+
+      - name: Generate SVGs from Mermaid Files
+        run: |
+          mkdir -p docs/images
+          
+          # Loop through all .mmd files and generate corresponding .svg files
+          for file in docs/diagrams/*.mmd; do
+            if [ -f "$file" ]; then
+              filename=$(basename -- "$file")
+              name="${filename%.*}"
+              echo "Generating SVG for $name..."
+              # Generate SVG with transparent background
+              mmdc -i "$file" -o "docs/images/${name}.svg" -b transparent
+            fi
+          done
+
+      - name: Commit and Push Generated SVGs
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: Auto-generate Mermaid SVGs"
+          file_pattern: "docs/images/*.svg"

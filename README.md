@@ -23,7 +23,50 @@ Below is a conceptual block diagram representing the Wattstone SoC die layout. T
 
 ### Unified Components Structure
 
-To maintain a cohesive design language and simplify development, all architectural blocks in Wattstone are integrated under logical namespaces:
+To maintain a cohesive design language and simplify development, all architectural blocks in Wattstone are integrated under logical namespaces. Here is how they all connect together on the die:
+
+<details open>
+<summary><b>Wattstone Unified SoC Top Architecture</b></summary>
+
+```mermaid
+graph TD
+    classDef cpu fill:#ffcccc,stroke:#cc9999,color:#000
+    classDef gpu fill:#ccddff,stroke:#99aacc,color:#000
+    classDef tpu fill:#eebbff,stroke:#bb99cc,color:#000
+    classDef npu fill:#ccffcc,stroke:#99cc99,color:#000
+    classDef uncore fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef mem fill:#ddeecc,stroke:#99bb99,color:#000
+
+    subgraph Wattstone [Wattstone Unified SoC]
+        direction TB
+        
+        CPU[Compute Core]:::cpu
+        GPU[Graphics Engine]:::gpu
+        TPU[Tensor Core]:::tpu
+        NPU[Neural Core]:::npu
+        DISP[Display Engine]:::gpu
+        
+        AXI{High-Speed AXI Interconnect Crossbar}:::uncore
+        
+        CPU <--> AXI
+        GPU <--> AXI
+        TPU <--> AXI
+        NPU <--> AXI
+        DISP <--> AXI
+        
+        SLC[System Level Cache - SLC]:::mem
+        
+        AXI <--> SLC
+        
+        UMC[Unified Memory Controller]:::mem
+        
+        SLC <--> UMC
+    end
+    
+    DDR[(External LPDDR5 Memory)]:::mem
+    UMC <--> DDR
+```
+</details>
 
 *   **Wattstone Compute Core (CPU)**: A high-performance, superscalar, Out-of-Order (OoO) RISC-V processor cluster. Serves as the primary orchestrator, fully capable of booting and running modern UNIX-based operating systems (Linux/BSD).
 *   **Wattstone Graphics Engine (GPU)**: A massively parallel graphics processor for 3D rendering and high-bandwidth rasterization workloads.
@@ -80,6 +123,49 @@ graph TD
         
         L1I --> IFU
         LSU <--> L1D
+    end
+```
+</details>
+
+<details>
+<summary><b>Wattstone Graphics Engine (GPU)</b></summary>
+
+```mermaid
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph GPU [Graphics Engine]
+        direction TB
+        CMD[Command Processor / Dispatcher]:::control
+        DCR[Device Control Register]:::control
+        
+        CMD --> DCR
+        
+        subgraph ShaderCores [Compute Cores / Shaders]
+            direction LR
+            C1[Core 0]:::compute
+            C2[Core 1]:::compute
+            C3[Core 2]:::compute
+            C4[Core 3]:::compute
+        end
+        
+        DCR --> ShaderCores
+        
+        L2[Shared L2 Cache]:::localmem
+        
+        C1 --> L2
+        C2 --> L2
+        C3 --> L2
+        C4 --> L2
+        
+        PMC[Program Memory Controller]:::globalmem
+        DMC[Data Memory Controller]:::globalmem
+        
+        L2 <--> PMC
+        L2 <--> DMC
     end
 ```
 </details>

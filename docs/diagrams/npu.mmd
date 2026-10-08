@@ -1,0 +1,30 @@
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph NPU [Wattstone Neural Core]
+        direction TB
+        Seq[Sequencer / Controller]:::control
+        AXI[AXI Interface]:::globalmem
+        
+        SRAM[On-Chip SRAM Buffer]:::localmem
+        
+        AXI <--> SRAM
+        
+        subgraph Engines [Compute Engines]
+            MAC[MAC Array]:::compute
+            Act[Activation Engine]:::compute
+            Pool[Pooling Engine]:::compute
+        end
+        
+        Seq --> MAC
+        Seq --> Act
+        Seq --> Pool
+        
+        SRAM --> MAC
+        MAC --> Act
+        Act --> Pool
+        Pool --> SRAM
+    end

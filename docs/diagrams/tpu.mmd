@@ -1,0 +1,30 @@
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph TPU [Wattstone Tensor Core]
+        direction TB
+        Dispatch[Instruction Dispatcher]:::control
+        DMA[DMA Controller]:::globalmem
+        
+        subgraph Memory [Local Memory]
+            WM[Weight Memory]:::localmem
+            AM[Activation Memory]:::localmem
+            ACC[Accumulator Memory]:::localmem
+        end
+        
+        DMA --> WM
+        DMA --> AM
+        
+        subgraph MMU [Matrix Multiply Unit]
+            SA[Systolic Array 128x128]:::compute
+        end
+        
+        WM --> SA
+        AM --> SA
+        SA --> ACC
+        ACC --> VPU[Vector Processing Unit]:::compute
+        VPU --> AM
+    end

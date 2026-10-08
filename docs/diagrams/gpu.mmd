@@ -1,0 +1,36 @@
+graph TD
+    classDef control fill:#ffeedd,stroke:#ddbb99,color:#000
+    classDef compute fill:#ffeeaa,stroke:#ddbb99,color:#000
+    classDef localmem fill:#ddeecc,stroke:#99bb99,color:#000
+    classDef globalmem fill:#ccddff,stroke:#99aacc,color:#000
+
+    subgraph GPU [Wattstone Graphics Engine]
+        direction TB
+        CMD[Command Processor / Dispatcher]:::control
+        DCR[Device Control Register]:::control
+        
+        CMD --> DCR
+        
+        subgraph ShaderCores [Compute Cores / Shaders]
+            direction LR
+            C1[Core 0]:::compute
+            C2[Core 1]:::compute
+            C3[Core 2]:::compute
+            C4[Core 3]:::compute
+        end
+        
+        DCR --> ShaderCores
+        
+        L2[Shared L2 Cache]:::localmem
+        
+        C1 --> L2
+        C2 --> L2
+        C3 --> L2
+        C4 --> L2
+        
+        PMC[Program Memory Controller]:::globalmem
+        DMC[Data Memory Controller]:::globalmem
+        
+        L2 <--> PMC
+        L2 <--> DMC
+    end
