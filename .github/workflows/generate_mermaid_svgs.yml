@@ -34,19 +34,21 @@ jobs:
           # Create puppeteer config to fix sandbox issue in GitHub Actions runner
           echo '{"args": ["--no-sandbox", "--disable-setuid-sandbox"]}' > puppeteer-config.json
           
-          # Loop through all .mmd files and generate corresponding .svg files
+          # Loop through all .mmd files and generate corresponding .svg and .png files
           for file in docs/diagrams/*.mmd; do
             if [ -f "$file" ]; then
               filename=$(basename -- "$file")
               name="${filename%.*}"
-              echo "Generating SVG for $name..."
+              echo "Generating SVG and PNG for $name..."
               # Generate SVG with transparent background and no-sandbox
               mmdc -i "$file" -o "docs/images/${name}.svg" -b transparent -p puppeteer-config.json
+              # Generate PNG with transparent background and no-sandbox
+              mmdc -i "$file" -o "docs/images/${name}.png" -b transparent -p puppeteer-config.json
             fi
           done
 
-      - name: Commit and Push Generated SVGs
+      - name: Commit and Push Generated SVGs and PNGs
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "docs: Auto-generate Mermaid SVGs"
-          file_pattern: "docs/images/*.svg"
+          commit_message: "docs: Auto-generate Mermaid diagrams"
+          file_pattern: "docs/images/*.svg docs/images/*.png"
